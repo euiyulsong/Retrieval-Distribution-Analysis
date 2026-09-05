@@ -1,514 +1,355 @@
-# SciFact 실험 결과 분석
+# SciFact: BM25 / Dense / Cross-Encoder Threshold 실험 통합 분석
 
-## 결론
+## 1. 핵심 결론
 
-이번 실험은 꽤 명확해.
+이번 실험에서 가장 중요한 결론은 아래 3개야.
 
-> **BM25 raw score나 dense cosine에 하나의 global absolute threshold를 걸면 relevance를 안정적으로 분리하기 어렵다.**
+> **1) Raw BM25 / Dense cosine에 global absolute threshold를 직접 거는 건 불안정하다.**
+> **2) Cross-Encoder는 훨씬 더 relevance-oriented한 score를 만들지만, 그래도 perfect global threshold는 불가능했다.**
+> **3) Fine-tuning은 ranking과 score separation을 확실히 개선하지만, 자동으로 calibration까지 해결해주지는 않는다.**
 
-더 중요한 건 **fine-tuning 이후에도 이 문제가 사라지지 않았다는 점**이야.
+즉 실무적으로는:
 
-Dense fine-tuning은 retrieval 성능과 score discrimination 자체는 좋아졌지만, `cosine > 특정 값이면 relevant` 같은 형태로 완벽히 분리되지는 않았다. 
+```text
+BM25 / Dense raw score
+→ ranking signal로 사용
 
----
+Cross-Encoder
+→ relevance scoring에 더 적합
 
-## 1. Retrieval 성능
-
-| Retriever        |        MRR |   Recall@1 |   Recall@5 |  Recall@10 | Recall@100 |
-| ---------------- | ---------: | ---------: | ---------: | ---------: | ---------: |
-| BM25             |     0.6236 | **0.5075** |     0.7284 |     0.7740 |     0.8731 |
-| Dense Pretrained |     0.6113 |     0.4823 |     0.7379 |     0.7833 |     0.9250 |
-| Dense Fine-tuned | **0.6275** |     0.5039 | **0.7452** | **0.8264** | **0.9500** |
-
-Fine-tuning 이후 dense는 특히 deeper retrieval에서 개선이 분명하다. Recall@10은 `0.7833 → 0.8264`, Recall@100은 `0.925 → 0.95`로 상승했고 MRR도 `0.6113 → 0.6275`로 좋아졌다. 
-
-흥미로운 건 Recall@1만 보면 BM25가 `0.5075`로 fine-tuned dense의 `0.5039`보다 아주 약간 높다는 점이다. 즉 BM25는 lexical exact-match가 강한 SciFact에서 최상위 1개 후보는 여전히 강하지만, 후보 수가 늘어날수록 fine-tuned dense가 더 많은 relevant 문서를 회수한다.
+하지만 최종 binary filtering을 하려면
+→ validation 기반 threshold / calibration 필요
+```
 
 ---
 
-# 2. BM25 score는 query마다 scale이 심하게 달라짐
+# 2. Retrieval 성능 비교
 
-BM25 relevant score 분포:
+| Retriever               |        MRR |   Recall@1 |   Recall@5 |  Recall@10 | Recall@100 |
+| ----------------------- | ---------: | ---------: | ---------: | ---------: | ---------: |
+| BM25                    |     0.6236 |     0.5075 |     0.7284 |     0.7740 |     0.8731 |
+| Dense Pretrained        |     0.6113 |     0.4823 |     0.7379 |     0.7833 |     0.9250 |
+| Dense Fine-tuned        |     0.6275 |     0.5039 |     0.7452 | **0.8264** | **0.9500** |
+| CrossEncoder Pretrained |     0.6531 |     0.5486 |     0.7267 |     0.7906 |     0.8731 |
+| CrossEncoder Fine-tuned | **0.6974** | **0.5954** | **0.7703** |     0.8074 |     0.8731 |
+
+Dense fine-tuning은 candidate recall 쪽에 강했고, Cross-Encoder fine-tuning은 **top-rank quality**를 크게 끌어올렸다.
+
+특히 CrossEncoder Fine-tuned는:
+
+```text
+MRR      0.6531 → 0.6974
+Recall@1 0.5486 → 0.5954
+Recall@5 0.7267 → 0.7703
+```
+
+로 좋아졌다.
+
+즉 Cross-Encoder는 retrieval candidate를 더 잘 “재정렬”하는 역할에서 확실히 강하다.
+
+---
+
+# 3. BM25: ranking은 괜찮지만 global threshold classification은 약함
+
+BM25 relevant/non-relevant score는 상당히 겹쳤다.
 
 ```text
 Relevant
 mean = 41.21
 min  = 9.56
-25%  = 26.12
-50%  = 36.98
-75%  = 51.32
 max  = 132.96
-```
 
-반면 non-relevant:
-
-```text
 Non-relevant
 mean = 19.84
-min  = 4.84
 max  = 90.75
 ```
 
 즉:
 
 ```text
-minimum relevant = 9.56
-maximum irrelevant = 90.75
+min relevant     = 9.56
+max non-relevant = 90.75
 ```
 
-이다. 
+이라서 하나의 threshold로 완전히 분리할 수 없다.
 
-이 자체로 global threshold의 문제가 거의 끝난다.
-
-예를 들어:
-
-```text
-threshold = 10
-```
-
-이면 score 9.56짜리 실제 relevant는 제거된다.
-
-그런데 threshold를 9 정도로 낮추면 score가 20, 30, 50, 심지어 90인 non-relevant가 대거 통과한다.
-
-실제로 score overlap은:
-
-```text
-BM25
-min positive = 9.5579
-max negative = 90.7471
-
-overlap = 81.1892
-perfect global threshold possible = False
-```
-
-였다. 
-
----
-
-## 3. BM25 threshold sweep도 이걸 그대로 보여줌
-
-BM25에서 F1을 최대화하는 global threshold는 약:
+Best threshold도:
 
 ```text
 threshold = 55.16
-
 precision = 0.3403
 recall    = 0.2211
 F1        = 0.2680
+ROC-AUC   = 0.8492
 ```
 
-밖에 안 된다. 
+에 불과했다.
 
-이게 중요한 이유는 BM25의 ROC-AUC는:
+여기서 중요한 포인트는:
 
 ```text
-0.8492
+ROC-AUC = 0.849
 ```
 
-로 꽤 괜찮기 때문이다.
+로 ranking/discrimination 자체는 나쁘지 않은데,
+
+```text
+best threshold F1 = 0.268
+```
+
+이라는 점.
 
 즉:
 
-```text
-ranking ability        = 꽤 좋음
-absolute classification = 나쁨
-```
-
-이다.
-
-이건 BM25를 이해할 때 중요한 차이야.
-
-BM25는:
-
-```text
-이 query에서 doc A가 doc B보다 좋은가?
-```
-
-에는 꽤 유용하지만,
-
-```text
-score가 50 이상이면 relevant인가?
-```
-
-라는 의미의 calibrated score는 아니다.
+> **BM25 score는 상대적 ordering에는 유용하지만, relevance probability처럼 해석하면 안 된다.**
 
 ---
 
-# 4. 실제 BM25 반례가 상당히 극단적임
+# 4. Dense: cosine도 global threshold로는 여전히 애매함
 
-실제 true positive인데 BM25가:
-
-```text
-9.5579
-9.9861
-10.8139
-11.4198
-...
-```
-
-밖에 안 나오는 문서들이 존재한다. 예를 들어 `CCL19 is absent within dLNs.`의 실제 relevant 문서가 BM25 `9.9861`에 불과했다. 
-
-반대로 non-relevant인데:
-
-```text
-90.7471
-89.3378
-87.4138
-85.5875
-...
-```
-
-까지 올라간다. 
-
-즉 실제 데이터에서:
-
-```text
-relevant     = 9.56
-non-relevant = 90.75
-```
-
-라는 역전 사례가 존재한다.
-
-이건 synthetic example보다 훨씬 강한 증거야.
-
----
-
-# 5. Dense pretrained도 똑같은 문제가 있음
-
-Pretrained dense의 score 분포:
+Dense pretrained는:
 
 ```text
 Relevant
+min = 0.1986
 mean = 0.5828
-min  = 0.1986
-median = 0.6015
-max  = 0.8843
 
 Non-relevant
+max = 0.8436
 mean = 0.3750
-max  = 0.8436
 ```
 
-이다. 
+이라서 overlap이 매우 컸다.
 
-즉:
+Best threshold:
 
 ```text
-true positive minimum = 0.1986
-false positive maximum = 0.8436
-```
-
-이다.
-
-우리가 앞에서 얘기했던:
-
-> "그럼 threshold를 0.3으로 낮추면 되잖아?"
-
-에 대한 실제 benchmark 답이 여기서 나온다.
-
----
-
-# 6. threshold=0.3은 recall은 높지만 precision이 사실상 박살남
-
-Pretrained dense에서:
-
-| threshold |  Precision |     Recall |     F1 |
-| --------: | ---------: | ---------: | -----: |
-|       0.1 |     0.0105 |     1.0000 | 0.0209 |
-|       0.2 |     0.0107 |     0.9968 | 0.0211 |
-|   **0.3** | **0.0126** | **0.9810** | 0.0248 |
-|       0.4 |     0.0256 |     0.9146 | 0.0499 |
-|       0.5 |     0.0990 |     0.7152 | 0.1739 |
-|       0.6 |     0.3225 |     0.5032 | 0.3931 |
-|       0.7 |     0.5217 |     0.1899 | 0.2784 |
-|       0.8 |     0.7273 |     0.0253 | 0.0489 |
-
-
-
-`0.3`이면 recall은 98.1%라 거의 다 살린다.
-
-문제는:
-
-```text
-TP = 310
-FP = 24,376
-```
-
-이라는 것.
-
-즉 **정답 거의 다 살리려고 threshold를 낮추면 오답도 거의 다 통과한다.**
-
-그래서 단순히:
-
-```python
-if cosine >= 0.3:
-    keep
-```
-
-는 사실상 filtering 역할을 거의 못 한다.
-
----
-
-# 7. 그런데 threshold를 높이면 recall이 무너짐
-
-`threshold = 0.6`에서는:
-
-```text
-precision = 0.3225
-recall    = 0.5032
-```
-
-이고,
-
-`threshold = 0.7`에서는:
-
-```text
-precision = 0.5217
-recall    = 0.1899
-```
-
-까지 떨어진다. 
-
-즉 매우 전형적인 trade-off:
-
-```text
-threshold ↓
-→ recall ↑
-→ FP 폭증
-
-threshold ↑
-→ precision ↑
-→ FN 폭증
-```
-
-이 그래프에서 그대로 나타난다.
-
----
-
-# 8. 실제 dense counterexample이 매우 강함
-
-Pretrained dense의 실제 low-score true positive:
-
-```text
-CCL19 is absent within dLNs.
-cosine = 0.1986
-
-Venules have a larger lumen diameter than arterioles.
-cosine = 0.2320
-
-Arterioles have a larger lumen diameter than venules.
-cosine = 0.2456
-```
-
-등이 존재한다. 
-
-즉 우리가 찾으려고 했던:
-
-> **“cosine이 0.2 언저리인데 실제 relevant인 케이스”**
-
-가 공개 benchmark에서 실제로 나왔다.
-
-반대로 non-relevant인데:
-
-```text
-0.8436
-0.8384
-0.8270
-0.7959
-...
-```
-
-같이 매우 높은 cosine을 가지는 문서도 존재한다. 
-
-즉 실제로:
-
-```text
-relevant     = 0.1986
-non-relevant = 0.8436
-```
-
-이 가능하다.
-
-따라서 global cosine threshold 하나로는 둘을 분리할 방법이 없다.
-
----
-
-# 9. Fine-tuning하면 어떻게 변했나
-
-Fine-tuning은 꽤 재미있는 결과를 만들었다.
-
-Score distribution:
-
-```text
-Dense Fine-tuned
-
-Non-relevant mean = 0.3217
-Relevant mean     = 0.5681
-```
-
-Pretrained는:
-
-```text
-Non-relevant mean = 0.3750
-Relevant mean     = 0.5828
-```
-
-였다. 
-
-즉 fine-tuning 후 가장 크게 바뀐 건:
-
-```text
-negative score가 아래로 밀림
-```
-
-이다.
-
-positive 평균은 오히려:
-
-```text
-0.5828 → 0.5681
-```
-
-로 조금 낮아졌지만,
-
-negative는:
-
-```text
-0.3750 → 0.3217
-```
-
-로 더 크게 내려갔다.
-
-그래서 **positive-negative separation 자체는 좋아졌다.**
-
----
-
-# 10. 실제로 ROC-AUC는 크게 상승
-
-Dense pretrained:
-
-```text
-ROC-AUC = 0.8994
-```
-
-Fine-tuned:
-
-```text
-ROC-AUC = 0.9240
-```
-
-로 개선됐다. 
-
-즉 학습으로:
-
-> “relevant를 irrelevant보다 위에 놓는 능력”
-
-은 확실히 좋아졌다.
-
-이건 retrieval metric 개선과도 일치한다.
-
----
-
-# 11. 그런데 threshold F1은 오히려 약간 떨어짐
-
-재미있는 부분이다.
-
-```text
-Dense_Pretrained
-best threshold = 0.6164
-Precision = 0.3756
-Recall    = 0.4589
+threshold = 0.6164
+precision = 0.3756
+recall    = 0.4589
 F1        = 0.4131
-
-Dense_Finetuned
-best threshold = 0.5799
-Precision = 0.3300
-Recall    = 0.5093
-F1        = 0.4005
+ROC-AUC   = 0.8994
 ```
 
-
-
-즉:
+Fine-tuning 후에는:
 
 ```text
 ROC-AUC:
-0.899 → 0.924 ↑
-
-Retrieval Recall@10:
-0.783 → 0.826 ↑
-
-하지만 best threshold F1:
-0.413 → 0.400 ↓
+0.8994 → 0.9240
 ```
 
-이게 아주 중요한 결과야.
+로 좋아졌지만,
+
+```text
+Best F1:
+0.4131 → 0.4005
+```
+
+로 오히려 약간 떨어졌다.
+
+이게 중요한 이유는:
+
+> **contrastive fine-tuning은 ranking separation을 개선하지만, score를 calibrated probability로 만들어주지는 않는다.**
+
+는 걸 실제로 보여주기 때문이다.
 
 ---
 
-# 12. 왜 학습했는데 threshold classification은 안 좋아졌나
+# 5. Dense fine-tuning은 무엇을 개선했나
 
-이유는 학습 objective 때문이라고 보는 게 자연스럽다.
+Fine-tuning 전후 평균 score:
 
-이번 fine-tuning은 contrastive retrieval training이라 기본 목적은:
+```text
+Pretrained
+Relevant     0.5828
+Non-relevant 0.3750
 
-$$
-s(q,d^+) > s(q,d^-)
-$$
+Fine-tuned
+Relevant     0.5681
+Non-relevant 0.3217
+```
 
-이다.
+positive 평균은 거의 비슷하지만 negative가 더 아래로 내려갔다.
 
 즉:
 
 ```text
-positive가 negative보다 높게
+positive ↔ negative separation
 ```
 
-만들면 된다.
+은 더 좋아졌다.
 
-반면 우리가 threshold로 원하는 건:
+그래서 ROC-AUC가:
 
-$$
-s(q,d) > T
-\iff
-relevant
-$$
+```text
+0.899 → 0.924
+```
 
-이다.
+로 상승했다.
 
-이 둘은 완전히 다른 목표다.
+하지만 overlap은 여전히:
 
-그래서 fine-tuning 이후 ranking separation은 좋아졌지만 score 자체가 relevance probability로 calibration되지는 않았다.
+```text
+Pretrained
+min positive = 0.1986
+max negative = 0.8436
+
+Fine-tuned
+min positive = 0.2233
+max negative = 0.8474
+```
+
+였기 때문에 perfect global threshold는 불가능했다.
 
 ---
 
-# 13. Fine-tuning 후에도 score overlap은 엄청 큼
+# 6. Cross-Encoder는 확실히 한 단계 더 좋아짐
 
-결과:
+여기서 가장 중요한 결과.
+
+### Pretrained Cross-Encoder
 
 ```text
+Relevant
+mean = 2.2714
+std  = 4.2934
+min  = -9.0009
+max  = 10.1130
+
+Non-relevant
+mean = -6.9879
+std  = 3.2092
+min  = -11.4483
+max  = 7.8063
+```
+
+### Fine-tuned Cross-Encoder
+
+```text
+Relevant
+mean = 0.3924
+std  = 2.2036
+min  = -5.3420
+max  = 5.6980
+
+Non-relevant
+mean = -4.2898
+std  = 1.3456
+min  = -9.9173
+max  = 3.1713
+```
+
+Fine-tuning 후 두 분포가 훨씬 더 compact해졌고 negative 분포가 더 아래로 밀렸다.
+
+---
+
+# 7. Cross-Encoder threshold 성능
+
+## Pretrained
+
+```text
+best threshold = 4.4094
+precision      = 0.6011
+recall         = 0.3844
+F1             = 0.4689
+ROC-AUC        = 0.9414
+```
+
+## Fine-tuned
+
+```text
+best threshold = 0.0965
+precision      = 0.6653
+recall         = 0.5408
+F1             = 0.5966
+ROC-AUC        = 0.9718
+```
+
+이건 꽤 큰 개선이야.
+
+Dense fine-tuned와 비교하면:
+
+| Model                   |    ROC-AUC |    Best F1 |
+| ----------------------- | ---------: | ---------: |
+| Dense Pretrained        |     0.8994 |     0.4131 |
+| Dense Fine-tuned        |     0.9240 |     0.4005 |
+| CrossEncoder Pretrained |     0.9414 |     0.4689 |
+| CrossEncoder Fine-tuned | **0.9718** | **0.5966** |
+
+즉 relevance thresholding 관점에서는:
+
+```text
+BM25
+<
+Dense
+<
+Cross-Encoder
+<
+Fine-tuned Cross-Encoder
+```
+
+순서로 좋아졌다고 봐도 된다.
+
+---
+
+# 8. Fine-tuned Cross-Encoder는 global threshold에 훨씬 적합해짐
+
+Fine-tuned CE는 threshold F1이:
+
+```text
+0.5966
+```
+
+이고 precision / recall도:
+
+```text
+precision = 0.665
+recall    = 0.541
+```
+
+이라서 BM25나 dense보다 훨씬 균형이 좋다.
+
+즉 이 결과는 우리가 앞에서 얘기했던:
+
+```text
+raw retriever score
+vs
+relevance model score
+```
+
+차이를 아주 잘 보여준다.
+
+Cross-Encoder는 query-doc pair를 함께 보고 relevance를 직접 학습하기 때문에 binary relevance gate에 더 적합하다.
+
+---
+
+# 9. 하지만 Cross-Encoder도 perfect global threshold는 아님
+
+이게 제일 중요한 caveat.
+
 Pretrained:
-min positive = 0.1986
-max negative = 0.8436
-overlap      = 0.6450
+
+```text
+min positive = -9.0009
+max negative = 7.8063
+overlap = 16.8071
+```
 
 Fine-tuned:
-min positive = 0.2233
-max negative = 0.8474
-overlap      = 0.6241
-```
-
-
-
-overlap 자체는 조금 줄었다:
 
 ```text
-0.645 → 0.624
+min positive = -5.3420
+max negative = 3.1713
+overlap = 8.5133
 ```
 
-하지만 여전히 매우 크다.
+Fine-tuning으로 overlap이 거의 절반 가까이 줄었다.
 
-따라서 fine-tuning 후에도:
+```text
+16.81 → 8.51
+```
+
+하지만 여전히:
 
 ```text
 perfect global threshold possible = False
@@ -516,232 +357,251 @@ perfect global threshold possible = False
 
 다.
 
----
-
-# 14. Fine-tuned에서도 cosine 0.22짜리 실제 정답이 있음
-
-Fine-tuned model에서도:
-
-```text
-NOX2-independent pathways...
-relevant score = 0.2233
-
-single flash-evoked ERG...
-relevant score = 0.2249
-
-ML-SA1...
-relevant score = 0.2319
-```
-
-같은 사례가 나온다. 
-
-반대로 non-relevant인데:
-
-```text
-0.8474
-0.8411
-0.8303
-...
-```
-
-까지 나온다. 
-
-즉 학습했다고 해도:
-
-```text
-cosine ≈ confidence
-```
-
-가 되는 게 아니다.
-
----
-
-# 15. Fine-tuning 후 fixed threshold 결과
-
-Fine-tuned dense:
-
-| Threshold |  Precision | Recall |         F1 |
-| --------: | ---------: | -----: | ---------: |
-|       0.1 |     0.0108 | 1.0000 |     0.0214 |
-|       0.2 |     0.0111 | 1.0000 |     0.0220 |
-|       0.3 |     0.0187 | 0.9599 |     0.0368 |
-|       0.4 |     0.0617 | 0.8549 |     0.1151 |
-|       0.5 |     0.1792 | 0.6759 |     0.2833 |
-|       0.6 | **0.3540** | 0.4414 | **0.3929** |
-|       0.7 |     0.5575 | 0.1944 |     0.2883 |
-|       0.8 |     0.8000 | 0.0370 |     0.0708 |
-
-
-
-여기서도 threshold `0.3`은:
-
-```text
-Recall ≈ 96%
-Precision ≈ 1.9%
-```
-
-라서 practical filter로는 너무 permissive하다.
-
----
-
-# 16. 이 그래프들이 말하는 것
-
-### Top-1 score distribution
-
-BM25 top-1 score는 대략 `10~130`까지 매우 넓게 퍼져 있다.
-
-즉 같은 "top-1"인데도 query에 따라 raw BM25 scale이 매우 다르다.
-
-Dense top-1도 대략:
-
-```text
-0.33 ~ 0.88
-```
-
-까지 상당히 넓게 퍼져 있다.
-
-따라서:
-
-```text
-top-1 cosine 자체도 query마다 절대 scale이 동일하지 않음
-```
-
-을 보여준다.
-
----
-
-## Relevant vs Non-relevant histogram
-
-가장 중요한 그림은 이거야.
-
-Dense에서 relevant가 우측으로 이동해 있고 non-relevant는 좌측에 많이 몰려 있지만, 중간 `0.35~0.60` 영역에서 상당히 겹친다.
-
-BM25도 마찬가지로 relevant 평균은 높지만 distribution overlap이 매우 크다.
-
 즉:
 
-> **score가 useful하지 않은 게 아니라, score 하나로 binary relevance를 완벽히 결정하기 어렵다는 것.**
+> **Cross-Encoder도 score가 완전히 calibrated probability가 되는 것은 아니다.**
 
 ---
 
-# 17. 이번 실험에서 가장 중요한 구분
+# 10. Fine-tuning 효과는 Cross-Encoder에서 훨씬 명확함
 
-이번 결과를 보고:
-
-> "threshold는 쓰면 안 된다"
-
-라고 결론 내리면 너무 강하다.
-
-정확한 결론은:
-
-> **raw retrieval score에 하나의 fixed global threshold를 두는 것은 retrieval relevance filtering에 취약하다.**
-
-threshold 자체는 충분히 쓸 수 있어.
-
-예를 들어 labeled validation set에서:
+Dense는 fine-tuning 후:
 
 ```text
-query features
-BM25
-dense cosine
-rank
-top1-top2 margin
-query length
-reranker score
+ROC-AUC
+0.899 → 0.924
+
+Best F1
+0.413 → 0.400
 ```
 
-등을 넣어서:
+이었는데,
+
+Cross-Encoder는:
+
+```text
+ROC-AUC
+0.941 → 0.972
+
+Best F1
+0.469 → 0.597
+```
+
+로 둘 다 개선됐다.
+
+즉 Cross-Encoder에서는 fine-tuning이:
+
+```text
+ranking quality
++
+threshold separability
+```
+
+둘 다 좋아지게 만들었다.
+
+이 차이가 중요한 이유는 objective와 architecture 차이 때문이라고 보는 게 자연스럽다.
+
+Dense retriever는 보통:
 
 $$
-P(relevant|q,d)
+s(q,d^+) > s(q,d^-)
 $$
 
-를 학습한 뒤:
+만 만족하면 되고,
+
+Cross-Encoder binary relevance training은 좀 더 직접적으로:
+
+$$
+f(q,d) \rightarrow relevance
+$$
+
+를 학습한다.
+
+그래서 thresholding에 더 유리한 score space를 만든다.
+
+---
+
+# 11. Score overlap 비교
+
+| Model            | Min Positive | Max Negative |   Overlap |
+| ---------------- | -----------: | -----------: | --------: |
+| BM25             |         9.56 |        90.75 |     81.19 |
+| Dense Pretrained |        0.199 |        0.844 |     0.645 |
+| Dense Fine-tuned |        0.223 |        0.847 |     0.624 |
+| CE Pretrained    |       -9.001 |        7.806 |    16.807 |
+| CE Fine-tuned    |       -5.342 |        3.171 | **8.513** |
+
+단위가 달라서 overlap absolute magnitude 자체를 모델 간 직접 비교하면 안 돼.
+
+중요한 건 **같은 모델의 before/after**다.
+
+Cross-Encoder는:
+
+```text
+16.81 → 8.51
+```
+
+로 overlap이 크게 감소했다.
+
+Dense는:
+
+```text
+0.645 → 0.624
+```
+
+로 감소 폭이 작았다.
+
+---
+
+# 12. 모델별 threshold 적합성
+
+이번 실험 기준으로 정리하면:
+
+```text
+BM25 raw score
+────────────────────
+ranking: O
+global relevance threshold: X
+
+
+Dense cosine
+────────────────────
+ranking: O
+global relevance threshold: △
+fine-tuning 후에도 calibration 약함
+
+
+Cross-Encoder raw logit
+────────────────────
+ranking: O
+threshold: 꽤 가능
+하지만 overlap 존재
+
+
+Fine-tuned Cross-Encoder
+────────────────────
+ranking: 매우 좋음
+threshold: 가장 실용적
+그래도 validation/calibration 필요
+```
+
+---
+
+# 13. 가장 중요한 실무적 해석
+
+이 결과를 보고:
+
+> "global threshold는 쓰면 안 된다"
+
+라고 결론내리면 잘못이다.
+
+더 정확한 결론은:
+
+> **global threshold의 적합성은 score가 얼마나 relevance-oriented / calibrated 되어 있느냐에 따라 달라진다.**
+
+Raw BM25/cosine은:
+
+```text
+score = retrieval ranking signal
+```
+
+에 가깝다.
+
+Fine-tuned Cross-Encoder는:
+
+```text
+score ≈ relevance signal
+```
+
+에 더 가까워진다.
+
+그래서 실무 구조를 이렇게 가져가는 게 자연스럽다.
+
+```text
+Query
+  ↓
+BM25 / Dense
+  ↓
+top-K candidates
+  ↓
+Cross-Encoder
+  ↓
+calibrated relevance score
+  ↓
+threshold
+  ↓
+final results
+```
+
+---
+
+# 14. Cross-Encoder에도 calibration을 추가하면 더 좋아질 수 있음
+
+현재 CE score는 raw logit이야.
+
+예를 들어 fine-tuned CE에서:
+
+```text
+threshold ≈ 0.0965
+```
+
+가 best였는데, 이 값 자체는 다른 dataset/domain으로 그대로 가져가면 안 된다.
+
+대신 validation set에서:
 
 ```python
-if p_relevant > 0.8:
+raw_logit
+    ↓
+Platt scaling
+or
+Isotonic regression
+    ↓
+P(relevant)
+```
+
+로 calibration하면:
+
+```python
+if p_relevant >= 0.7:
     keep
 ```
 
-하는 건 전혀 다른 얘기다.
+처럼 훨씬 해석 가능한 global threshold를 만들 수 있다.
 
 ---
 
-# 18. 이번 실험의 가장 강한 증거 3개
+# 15. 최종 결론
 
-### ① BM25
+이번 전체 실험을 한 줄로 압축하면:
 
-```text
-Relevant minimum     = 9.56
-Non-relevant maximum = 90.75
-```
+> **Raw BM25와 dense cosine은 ranking signal로는 강하지만 global relevance threshold로 쓰기에는 score overlap과 query-wise scale variation이 크다. Cross-Encoder는 query-document interaction을 직접 모델링해 score separation과 threshold performance를 크게 개선하며, fine-tuning 후 ROC-AUC 0.972 / F1 0.597까지 향상됐다. 다만 Cross-Encoder조차 positive/negative score overlap이 남으므로, production에서 global threshold를 사용할 경우 validation 기반 calibration이 여전히 필요하다.**
 
-
-
-즉 raw score가 9인 정답과 90인 오답이 동시에 존재.
-
----
-
-### ② Dense pretrained
+실무 우선순위로 쓰면:
 
 ```text
-Relevant minimum     = 0.1986
-Non-relevant maximum = 0.8436
+1. Fine-tuned + calibrated Cross-Encoder threshold
+   → 가장 추천
+
+2. Fine-tuned Cross-Encoder raw threshold
+   → 꽤 실용적
+
+3. Query/domain-specific dense threshold
+   → 제한적으로 가능
+
+4. Raw dense cosine global threshold
+   → 주의
+
+5. Raw BM25 global threshold
+   → 가장 비추천
 ```
 
-
-
-그래서 `threshold=0.2`, `0.3`, `0.4` 중 무엇을 골라도 trade-off가 발생.
-
----
-
-### ③ Fine-tuning도 문제를 제거하지 못함
-
-```text
-Dense fine-tuned
-
-ROC-AUC 0.899 → 0.924
-Recall@10 0.783 → 0.826
-
-하지만
-
-min relevant     = 0.223
-max non-relevant = 0.847
-```
-
-즉 **ranking은 개선되지만 score calibration은 자동으로 해결되지 않는다.** 
-
----
-
-# 최종 정리
-
-이번 실험 결과를 한 문장으로 요약하면:
-
-> **BM25와 dense cosine은 relevance ranking signal로는 유용하지만 calibrated probability가 아니므로, raw absolute threshold 하나로 relevance filtering을 하면 false positive와 false negative를 동시에 피하기 어렵다. Contrastive fine-tuning은 ranking discrimination과 retrieval recall을 개선하지만 global score calibration 문제까지 자동으로 해결하지는 않는다.**
-
-실무적으로는 이렇게 보는 게 가장 맞아.
-
-```text
-Bad
-─────────────────────────
-BM25 > 30
-cosine > 0.5
-       ↓
-KEEP
-
-
-Better
-─────────────────────────
-retrieve top-K
-       ↓
-reranker / relevance model
-       ↓
-P(relevant | q,d)
-       ↓
-calibrated threshold
-       ↓
-KEEP / DROP
-```
+그리고 이번 결과에서 가장 강한 메시지는 **“threshold가 나쁜 게 아니라, threshold를 거는 score의 성격이 중요하다”**는 거야.
+<img width="1800" height="1080" alt="crossencoder_pretrained_top1" src="https://github.com/user-attachments/assets/1e0c27dc-7226-4feb-b28f-2940828ce068" />
+<img width="1800" height="1080" alt="crossencoder_pretrained_threshold_curve" src="https://github.com/user-attachments/assets/164a14e9-3a81-4e07-9156-4466c328ba80" />
+<img width="1800" height="1080" alt="crossencoder_pretrained_distribution" src="https://github.com/user-attachments/assets/255e4634-7e83-4124-a348-568c24c30ecb" />
+<img width="1800" height="1080" alt="crossencoder_finetuned_top1" src="https://github.com/user-attachments/assets/6a039e0b-033c-402b-b55b-a53af153e11b" />
+<img width="1800" height="1080" alt="crossencoder_finetuned_threshold_curve" src="https://github.com/user-attachments/assets/16c5ecf3-2382-4b63-84cf-4a7682f348b3" />
+<img width="1800" height="1080" alt="crossencoder_finetuned_distribution" src="https://github.com/user-attachments/assets/70f55d5e-c75e-4b98-bdf0-bb5a36419105" />
 
 <img width="1600" height="960" alt="scifact_bm25_threshold_curve" src="https://github.com/user-attachments/assets/86e9404c-ad88-4342-becb-8fb0347aa4c4" />
 <img width="1600" height="960" alt="scifact_bm25_distribution" src="https://github.com/user-attachments/assets/e358d90f-717c-48ff-b8d1-8c72c8238b41" />
@@ -751,5 +611,3 @@ KEEP / DROP
 <img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/910e7bb8-ff93-47a5-afa0-40b1503330be" />
 
 
-
-`0.3`에서는 pretrained 기준 **recall 98.1%지만 precision 1.26%**, fine-tuned에서도 **recall 96.0%지만 precision 1.87%**밖에 안 된다. 즉 **threshold를 낮추면 정답은 살지만 filter 자체가 거의 의미 없어지는 것**이 실제 공개 데이터에서 확인됐다. 
