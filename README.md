@@ -743,6 +743,10 @@ calibrated threshold
 KEEP / DROP
 ```
 
-특히 이번 실험은 네가 처음 물었던 **“그럼 그냥 cosine threshold를 0.3으로 잡으면 되는 거 아닌가?”**에 꽤 직접적인 답을 준다.
+
+![Uploading scifact_dense_top1.png…]()
+<img width="1600" height="960" alt="scifact_bm25_top1" src="https://github.com/user-attachments/assets/a401a8a4-9fa4-4b13-93df-bba4932880a3" />
+<img width="1600" height="960" alt="scifact_dense_threshold_curve" src="https://github.com/user-attachments/assets/d30e6467-69a2-4dad-8a2a-db8ffd6329a0" />
+<img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/171602c0-0bc0-4c1c-9bae-0c2f41f71585" />
 
 `0.3`에서는 pretrained 기준 **recall 98.1%지만 precision 1.26%**, fine-tuned에서도 **recall 96.0%지만 precision 1.87%**밖에 안 된다. 즉 **threshold를 낮추면 정답은 살지만 filter 자체가 거의 의미 없어지는 것**이 실제 공개 데이터에서 확인됐다. 
