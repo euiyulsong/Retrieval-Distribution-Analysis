@@ -1,3 +1,4 @@
+<img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/ddcc38da-dfa1-42cd-8f1a-122c7a94f4bf" />
 # SciFact 실험 결과 분석
 
 ## 결론
@@ -743,10 +744,13 @@ calibrated threshold
 KEEP / DROP
 ```
 
+<img width="1600" height="960" alt="scifact_bm25_threshold_curve" src="https://github.com/user-attachments/assets/86e9404c-ad88-4342-becb-8fb0347aa4c4" />
+<img width="1600" height="960" alt="scifact_bm25_distribution" src="https://github.com/user-attachments/assets/e358d90f-717c-48ff-b8d1-8c72c8238b41" />
+<img width="1600" height="960" alt="scifact_dense_top1" src="https://github.com/user-attachments/assets/9b7d8697-6537-4327-8e43-f148164ced1c" />
+<img width="1600" height="960" alt="scifact_bm25_top1" src="https://github.com/user-attachments/assets/74784ed2-e35c-45c0-b513-ccc21d7b8428" />
+<img width="1600" height="960" alt="scifact_dense_threshold_curve" src="https://github.com/user-attachments/assets/950c293a-1896-46f2-bbab-ba1ec47adc06" />
+<img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/910e7bb8-ff93-47a5-afa0-40b1503330be" />
 
-![Uploading scifact_dense_top1.png…]()
-<img width="1600" height="960" alt="scifact_bm25_top1" src="https://github.com/user-attachments/assets/a401a8a4-9fa4-4b13-93df-bba4932880a3" />
-<img width="1600" height="960" alt="scifact_dense_threshold_curve" src="https://github.com/user-attachments/assets/d30e6467-69a2-4dad-8a2a-db8ffd6329a0" />
-<img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/171602c0-0bc0-4c1c-9bae-0c2f41f71585" />
+
 
 `0.3`에서는 pretrained 기준 **recall 98.1%지만 precision 1.26%**, fine-tuned에서도 **recall 96.0%지만 precision 1.87%**밖에 안 된다. 즉 **threshold를 낮추면 정답은 살지만 filter 자체가 거의 의미 없어지는 것**이 실제 공개 데이터에서 확인됐다. 
