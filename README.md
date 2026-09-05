@@ -1,4 +1,3 @@
-<img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/ddcc38da-dfa1-42cd-8f1a-122c7a94f4bf" />
 # SciFact 실험 결과 분석
 
 ## 결론
