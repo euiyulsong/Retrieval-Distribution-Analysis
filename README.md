@@ -646,3 +646,13 @@ Pretrained bi-encoder(`all-MiniLM-L6-v2`)를 SciFact train split의 **(query, re
 - Non-relevant는 대부분 -10 근처에, relevant는 대부분 0 이상에 몰린다.
 - 다만 -4 ~ -2 구간에서 두 분포가 겹치므로, 단일 global threshold로는 완벽히 분리되지 않는다 (위 섹션 9의 overlap 16.81과 같은 결과).
 - Bi-encoder(섹션 16)의 cosine 분리(ROC-AUC 0.940 / 0.959)와 비교하면, Cross-Encoder pretrained의 ROC-AUC(0.941, 섹션 7)와 거의 같은 수준이다.
+
+## 16-2. Fine-tuned Embedding의 relevant vs non-relevant 분포
+
+섹션 16에서 학습한 fine-tuned bi-encoder의 cosine score 분포를 같은 형식으로 그린 것이다. 대상은 test query별 top-30 후보 문서이다.
+
+![fine-tuned embedding relevant vs non-relevant](figures/ft_embedding_distribution.png)
+
+- Non-relevant는 cosine 0.2 ~ 0.25 부근에, relevant는 0.45 ~ 0.7 부근에 몰린다.
+- 두 분포의 겹침은 0.16 ~ 0.38 구간에 한정되며, 최댓값 non-relevant(0.716)와 최솟값 relevant(0.163)는 여전히 겹친다.
+- ROC-AUC는 0.959이다. 섹션 16-1의 Cross-Encoder pretrained 분포(ROC-AUC 0.941)보다 높다.
