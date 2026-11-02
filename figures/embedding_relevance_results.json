@@ -1,0 +1,16 @@
+{
+  "Pretrained": {
+    "roc_auc": 0.9397811807725421,
+    "mean_cos_rel": 0.5762127041816711,
+    "mean_cos_irrel": 0.30893486738204956,
+    "n_rel": 167,
+    "n_irrel": 4333
+  },
+  "Fine-tuned (relevant vs irrelevant)": {
+    "roc_auc": 0.9587957466400889,
+    "mean_cos_rel": 0.538091242313385,
+    "mean_cos_irrel": 0.2518591582775116,
+    "n_rel": 169,
+    "n_irrel": 4331
+  }
+}

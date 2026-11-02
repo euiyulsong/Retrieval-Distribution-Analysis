@@ -611,3 +611,28 @@ if p_relevant >= 0.7:
 <img width="1600" height="960" alt="scifact_dense_distribution" src="https://github.com/user-attachments/assets/910e7bb8-ff93-47a5-afa0-40b1503330be" />
 
 
+
+---
+
+# 16. Relevant / Irrelevant embedding 학습 후 공간 변화
+
+Pretrained bi-encoder(`all-MiniLM-L6-v2`)를 SciFact train split의 **(query, relevant doc, hard irrelevant doc)** triplet으로 MultipleNegativesRankingLoss 학습(2 epoch)한 뒤, test query와 후보 문서 임베딩이 relevant / irrelevant로 어떻게 재배치되는지 확인했다.
+
+- Hard negative: 학습 query에 대해 pretrained 모델 top-50 중 non-relevant 문서 3개
+- 평가: test query 150개, 각 query의 top-30 후보 문서 (relevant / irrelevant 라벨은 qrel 기준)
+- 그림: t-SNE 2D projection (같은 점 집합을 두 모델 임베딩으로 각각 투영)
+
+![relevant vs irrelevant embedding](figures/embedding_relevance_tsne.png)
+
+| Model                                | ROC-AUC (cosine) | mean cos (relevant) | mean cos (irrelevant) |
+| ------------------------------------ | ---------------: | ------------------: | --------------------: |
+| Pretrained                           |           0.9398 |              0.5762 |                0.3089 |
+| Fine-tuned (relevant vs irrelevant)  |       **0.9588** |              0.5381 |            **0.2519** |
+
+관찰:
+
+- Fine-tuning 후 irrelevant 문서의 평균 cosine이 0.309 → 0.252로 내려가면서 relevant와의 간격이 0.267 → 0.286으로 벌어졌다.
+- 2D 투영에서는 relevant 문서(파란색)가 query(빨간색) 근처에 조금 더 모이는 경향이 보이지만, 클러스터가 완전히 분리되지는 않는다. t-SNE는 거리와 밀도를 왜곡할 수 있으므로 이 그림은 정성적 참고용이다.
+- 이 실험은 빠른 확인용(2 epoch, 단일 seed)이며, 위의 ROC-AUC 차이는 seed에 따라 달라질 수 있다.
+
+재현: `python embed_relevance.py` (수치는 `figures/embedding_relevance_results.json`)
