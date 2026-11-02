@@ -636,3 +636,13 @@ Pretrained bi-encoder(`all-MiniLM-L6-v2`)를 SciFact train split의 **(query, re
 - 이 실험은 빠른 확인용(2 epoch, 단일 seed)이며, 위의 ROC-AUC 차이는 seed에 따라 달라질 수 있다.
 
 재현: `python embed_relevance.py` (수치는 `figures/embedding_relevance_results.json`)
+
+## 16-1. 참고: Cross-Encoder Pretrained의 relevant vs non-relevant 분포
+
+위의 bi-encoder 결과와 비교하기 위해, 같은 SciFact 실험에서 얻은 Cross-Encoder Pretrained의 relevant / non-relevant score 분포를 함께 둔다. Cross-Encoder는 query-document 쌍을 함께 입력받아 점수를 내므로 임베딩 공간이 아니라 score 분포로 비교한다.
+
+![cross-encoder pretrained relevant vs non-relevant](figures/crossencoder_pretrained_distribution.png)
+
+- Non-relevant는 대부분 -10 근처에, relevant는 대부분 0 이상에 몰린다.
+- 다만 -4 ~ -2 구간에서 두 분포가 겹치므로, 단일 global threshold로는 완벽히 분리되지 않는다 (위 섹션 9의 overlap 16.81과 같은 결과).
+- Bi-encoder(섹션 16)의 cosine 분리(ROC-AUC 0.940 / 0.959)와 비교하면, Cross-Encoder pretrained의 ROC-AUC(0.941, 섹션 7)와 거의 같은 수준이다.
