@@ -1,12 +1,24 @@
 # SciFact: BM25 / Dense / Cross-Encoder Threshold 실험 통합 분석
 
-## 방법별 relevant vs non-relevant 분포 비교
+## 방법별 relevant vs non-relevant 분포 비교 (동일 평가셋)
 
-![method comparison](figures/method_comparison_distribution.png)
+평가셋은 모두 SciFact **test split**이다 (query 300개, BM25 top-100 후보 30,000쌍, relevant 294쌍). 모든 방법이 같은 쌍을 점수화한다. Cross-Encoder fine-tuned는 train split으로 학습했다.
 
-- 각 패널의 x축은 방법마다 다르다 (BM25 score, cosine, Cross-Encoder logit). 같은 방법 안에서 분포 겹침만 비교한다.
-- Dense (fine-tuned) 패널은 섹션 16의 실험(test query 150개, top-30 후보)이고, 나머지 패널은 `test.py`의 결과 그림이다. 평가 후보 집합이 달라서 ROC-AUC 수치를 엄밀히 비교하지는 않는다.
-- Cross-Encoder fine-tuned은 두 분포가 가장 좁게 분리되지만, -4 ~ -2 구간에서 여전히 겹친다.
+![method comparison same eval](figures/method_comparison_same_eval.png)
+
+| Method | ROC-AUC | Best F1 | mean (relevant) | mean (non-relevant) |
+| --- | ---: | ---: | ---: | ---: |
+| BM25 | 0.849 | 0.269 | 41.21 | 19.84 |
+| Dense (pretrained) | 0.940 | 0.430 | 0.583 | 0.254 |
+| Dense (fine-tuned, relevant vs irrelevant) | 0.966 | 0.481 | 0.548 | 0.190 |
+| Cross-Encoder (pretrained) | 0.941 | 0.469 | 2.271 | -6.988 |
+| Cross-Encoder (fine-tuned) | **0.980** | **0.581** | 2.744 | -4.594 |
+
+- x축 단위는 방법마다 다르다 (BM25 score, cosine, Cross-Encoder logit). 같은 방법 안의 분포 겹침만 직접 비교한다.
+- 이 표와 그림은 same-eval 기준이다. 아래 섹션 1~15의 수치는 `test.py`/`test2.py`의 방법별 후보 집합으로 계산한 값이라 Dense 수치가 다르다.
+- BM25와 Cross-Encoder pretrained의 ROC-AUC는 기존 섹션 3, 7의 값과 일치한다.
+
+재현: `python compare_eval.py` (결과는 `figures/compare_eval_results.json`)
 
 ## 1. 핵심 결론
 
