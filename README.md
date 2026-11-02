@@ -1,5 +1,13 @@
 # SciFact: BM25 / Dense / Cross-Encoder Threshold 실험 통합 분석
 
+## 방법별 relevant vs non-relevant 분포 비교
+
+![method comparison](figures/method_comparison_distribution.png)
+
+- 각 패널의 x축은 방법마다 다르다 (BM25 score, cosine, Cross-Encoder logit). 같은 방법 안에서 분포 겹침만 비교한다.
+- Dense (fine-tuned) 패널은 섹션 16의 실험(test query 150개, top-30 후보)이고, 나머지 패널은 `test.py`의 결과 그림이다. 평가 후보 집합이 달라서 ROC-AUC 수치를 엄밀히 비교하지는 않는다.
+- Cross-Encoder fine-tuned은 두 분포가 가장 좁게 분리되지만, -4 ~ -2 구간에서 여전히 겹친다.
+
 ## 1. 핵심 결론
 
 이번 실험에서 가장 중요한 결론은 아래 3개야.
